@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 # 1. 페이지 설정
-st.set_page_config(page_title="퀀트 투자 통합 대시보드", layout="wide")
+st.set_page_config(page_title="Quant Dashboard", layout="wide")
 
 # --- 데이터 로직 함수들 ---
 
@@ -52,13 +52,21 @@ def get_dual_momentum_signal():
             data = yf.download(t, period='13m')['Close']
             ret_12m = (data.iloc[-1] / data.iloc[0]) - 1
             scores[t] = float(ret_12m)
-        
         winner = 'SPY' if scores['SPY'] > scores['EFA'] else 'EFA'
         if scores[winner] < scores['BIL'] or scores[winner] < 0:
-            return "현금 대피 (BIL)", "blue"
+            return "Cash (BIL)", "blue"
         return winner, "red"
     except:
-        return "데이터 오류", "gray"
+        return "Error", "gray"
 
 # --- 메인 화면 ---
-st.title("🚀 퀀트 투자 통합 리밸런싱 대
+st.title("Quant Portfolio Dashboard") # 한글 깨짐 방지를 위해 영문 혼용
+st.write(f"Updated: {datetime.now().strftime('%Y-%m-%d')}")
+
+# 섹션 1: 금 시세
+with st.expander("Gold Price Analysis", expanded=True):
+    kr_gold = get_korea_gold()
+    df_intl = load_gold_data()
+    if kr_gold and not df_intl.empty:
+        intl_gold = df_intl['Intl_KRW_g'].iloc[-1]
+        gap = ((kr_
