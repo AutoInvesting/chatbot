@@ -9,7 +9,7 @@ from datetime import datetime
 # 1. 페이지 설정
 st.set_page_config(page_title="Quant Dashboard", layout="wide")
 
-# --- 핵심 함수 (데이터 수집 및 모멘텀 계산) ---
+# --- 핵심 함수 정의 ---
 
 def get_gold():
     try:
@@ -18,7 +18,8 @@ def get_gold():
         soup = BeautifulSoup(res.text, 'html.parser')
         val = soup.select_one('.value').text
         return float(val.replace(',', ''))
-    except: return None
+    except:
+        return None
 
 @st.cache_data(ttl=3600)
 def load_data():
@@ -29,16 +30,19 @@ def load_data():
         df.columns = ['USD', 'FX']
         df['KRW_g'] = (df['USD'] * df['FX']) / 31.1034768
         return df
-    except: return pd.DataFrame()
+    except:
+        return pd.DataFrame()
 
 def get_score(ticker):
     try:
         d = yf.download(ticker, period='14m')['Close']
         if len(d) < 252: return -999.0
         c = d.iloc[-1]
+        # 13612 모멘텀 스코어 공식
         s = (12*(c/d.iloc[-21]-1)) + (4*(c/d.iloc[-63]-1)) + (2*(c/d.iloc[-126]-1)) + (1*(c/d.iloc[-252]-1))
         return float(s)
-    except: return -999.0
+    except:
+        return -999.0
 
 # --- 화면 구성 ---
 st.title("💰 Quant & Gold Dashboard")
@@ -61,31 +65,22 @@ with st.expander("Gold Analysis", expanded=True):
 
 st.divider()
 
-# 섹션 2: 3대 전략
-st.subheader("📬 Monthly Rebalancing")
+# 섹션 2: 3대 전략 리밸런싱
+st.subheader("📬 Monthly Rebalancing Signals")
 col1, col2, col3 = st.columns(3)
 
 with st.spinner('Calculating...'):
-    # 1. BAA
+    # 1. BAA 전략
     with col1:
         st.info("### 1. BAA")
-        if get_score('VWO') > 0 and get_score('BND') > 0:
+        vwo_s = get_score('VWO')
+        bnd_s = get_score('BND')
+        if vwo_s > 0 and bnd_s > 0:
             ast = ['QQQ', 'SPY', 'IWM', 'VGK', 'EWJ', 'VWO', 'GLD', 'DBC']
             res = {t: get_score(t) for t in ast}
-            st.error(f"MODE: Aggressive 🔥 / Buy: {max(res, key=res.get)}")
+            best = max(res, key=res.get)
+            st.error(f"MODE: Aggressive 🔥")
+            st.markdown(f"## Buy: {best}")
         else:
             ast = ['BIL', 'IEF', 'TIP']
-            res = {t: get_score(t) for t in ast}
-            st.success(f"MODE: Protective 🛡️ / Buy: {max(res, key=res.get)}")
-
-    # 2. Bond Dynamic
-    with col2:
-        st.info("### 2. Bond")
-        ast = ['TLT', 'IEF', 'SHY', 'LQD', 'TIP']
-        res = {t: get_score(t) for t in ast}
-        st.success(f"MODE: Rotation 📈 / Buy: {max(res, key=res.get)}")
-
-    # 3. Dual Momentum
-    with col3:
-        st.info("### 3. Dual")
-        s = {t: (yf.download(
+            res = {
