@@ -1,58 +1,74 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
+import requests
+from bs4 import BeautifulSoup
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
-# 페이지 기본 설정
-st.set_page_config(page_title="금 가격 괴리율 대시보드", layout="wide")
-st.title("📈 한국 vs 국제 금 가격 괴리율 분석")
+# 페이지 설정
+st.set_page_config(page_title="금 시세 괴리율 분석", layout="wide")
 
-@st.cache_data
-def load_data():
-    # 1. 국제 금 가격 (GC=F) 및 원달러 환율 (KRW=X) 데이터 가져오기
-    # 데이터가 없을 경우를 대비해 기간을 조금 넉넉히 잡습니다.
-    gold_intl = yf.download('GC=F', period='1y')['Close']
-    krw_usd = yf.download('KRW=X', period='1y')['Close']
-    
-    # 데이터프레임 병합
-    df = pd.concat([gold_intl, krw_usd], axis=1)
-    df.columns = ['Intl_Gold_USD_oz', 'Exchange_Rate']
-    
-    # 데이터가 비어있는 행 제거
+# 1. 네이버에서 오늘 한국 금 시세(원/g) 가져오기
+def get_korea_gold_price():
+    try:
+        url = "https://finance.naver.com/marketindex/goldDetail.naver"
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
+        soup = BeautifulSoup(res.text, 'html.parser')
+        price_text = soup.select_one('.value').text
+        return float(price_text.replace(',', ''))
+    except Exception as e:
+        st.error(f"국내 가격 로드 실패: {e}")
+        return None
+
+# 2. 국제 데이터 로드 (금 선물 & 환율)
+@st.cache_data(ttl=3600) # 1시간마다 캐시 갱신
+def load_intl_data():
+    # 금 선물(GC=F)과 환율(KRW=X) 최근 1년치
+    gold = yf.download('GC=F', period='1y')['Close']
+    fx = yf.download('KRW=X', period='1y')['Close']
+    df = pd.concat([gold, fx], axis=1)
+    df.columns = ['USD_oz', 'FX']
     df = df.dropna()
-    
-    if len(df) > 0:
-        # 2. 국제 금 가격을 원/g 단위로 변환 (1 troy ounce = 31.1034768 grams)
-        df['Intl_Gold_KRW_g'] = (df['Intl_Gold_USD_oz'] * df['Exchange_Rate']) / 31.1034768
-        
-        # 3. 한국 금 가격 (가상 데이터: 실제 연동 전까지 임시 사용)
-        np.random.seed(42)
-        premium = np.random.uniform(1.01, 1.03, len(df))
-        df['Korea_Gold_KRW_g'] = df['Intl_Gold_KRW_g'] * premium
-        
-        # 4. 괴리율 계산 (%)
-        df['Disparity_Rate'] = ((df['Korea_Gold_KRW_g'] - df['Intl_Gold_KRW_g']) / df['Intl_Gold_KRW_g']) * 100
-        
+    # 국제 가격을 원/g으로 환산 (1oz = 31.1034768g)
+    df['Intl_KRW_g'] = (df['USD_oz'] * df['FX']) / 31.1034768
     return df
 
-# 데이터 로드
-df = load_data()
+# 실행
+st.title("💰 국내/국제 금 시세 및 괴리율")
 
-# 데이터가 있는지 확인 후 출력
-if not df.empty:
-    # 최신 괴리율 지표
-    latest_disparity = df['Disparity_Rate'].iloc[-1]
-    st.metric(label="현재 김치 프리미엄(가상 괴리율)", value=f"{latest_disparity:.2f}%")
+kr_price = get_korea_gold_price()
+df_intl = load_intl_data()
 
-    # 차트 생성 로직
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Scatter(x=df.index, y=df['Korea_Gold_KRW_g'], name="한국 금 가격 (원/g)", line=dict(color='red')), secondary_y=False)
-    fig.add_trace(go.Scatter(x=df.index, y=df['Intl_Gold_KRW_g'], name="국제 금 가격 (원/g)", line=dict(color='blue', dash='dot')), secondary_y=False)
-    fig.add_trace(go.Bar(x=df.index, y=df['Disparity_Rate'], name="괴리율 (%)", opacity=0.3, marker_color='orange'), secondary_y=True)
+if kr_price and not df_intl.empty:
+    # 오늘의 국제 환산가 및 괴리율 계산
+    latest_intl_price = df_intl['Intl_KRW_g'].iloc[-1]
+    disparity = ((kr_price - latest_intl_price) / latest_intl_price) * 100
 
-    fig.update_layout(title_text="최근 1년 한국/국제 금 가격 및 괴리율 추이", hovermode="x unified")
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.error("데이터를 불러오지 못했습니다. 잠시 후 다시 시도하거나 인터넷 연결을 확인해주세요.")
+    # 상단 지표 레이아웃
+    col1, col2, col3 = st.columns(3)
+    col1.metric("오늘 국내 금값", f"{kr_price:,.0f} 원/g")
+    col2.metric("오늘 국제 환산가", f"{latest_intl_price:,.0f} 원/g")
+    col3.metric("오늘의 괴리율 (%)", f"{disparity:.2f}%", delta=f"{disparity:.2f}%", delta_color="inverse")
+
+    # 차트 그리기
+    fig = go.Figure()
+
+    # 국제 금값 선 그래프
+    fig.add_trace(go.Scatter(
+        x=df_intl.index, 
+        y=df_intl['Intl_KRW_g'],
+        mode='lines',
+        name='국제 금 시세(원/g 환산)',
+        line=dict(color='#1f77b4', width=2)
+    ))
+
+    # 우측 상단 괴리율 텍스트 박스 추가 (Annotation)
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.98, y=0.95,
+        text=f"<b>오늘의 괴리율: {disparity:.2f}%</b>",
+        showarrow=False,
+        font=dict(size=16, color="white"),
+        bgcolor="firebrick",
+        bordercolor="black",
+        borderwidth
