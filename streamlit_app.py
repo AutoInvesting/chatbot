@@ -5,10 +5,10 @@ import requests
 from bs4 import BeautifulSoup
 import plotly.graph_objects as go
 
-# 페이지 설정
+# 1. 페이지 기본 설정
 st.set_page_config(page_title="금 시세 괴리율 분석", layout="wide")
 
-# 1. 네이버에서 오늘 한국 금 시세(원/g) 가져오기
+# 2. 네이버에서 오늘 한국 금 시세(원/g) 가져오는 함수
 def get_korea_gold_price():
     try:
         url = "https://finance.naver.com/marketindex/goldDetail.naver"
@@ -19,26 +19,23 @@ def get_korea_gold_price():
     except Exception as e:
         return None
 
-# 2. 국제 데이터 로드 (금 선물 & 환율)
+# 3. 국제 데이터(금 선물, 환율) 로드 함수
 @st.cache_data(ttl=3600)
 def load_intl_data():
     try:
-        # 금 선물(GC=F)과 환율(KRW=X) 최근 1년치
         gold = yf.download('GC=F', period='1y')['Close']
         fx = yf.download('KRW=X', period='1y')['Close']
-        
         df = pd.concat([gold, fx], axis=1)
         df.columns = ['USD_oz', 'FX']
         df = df.dropna()
-        
         # 국제 가격을 원/g으로 환산 (1oz = 31.1034768g)
         df['Intl_KRW_g'] = (df['USD_oz'] * df['FX']) / 31.1034768
         return df
     except:
         return pd.DataFrame()
 
-# 실행
-st.title("💰 국내/국제 금 시세 및 괴리율")
+# --- 메인 실행 화면 ---
+st.title("💰 국내/국제 금 시세 및 괴리율 분석")
 
 kr_price = get_korea_gold_price()
 df_intl = load_intl_data()
@@ -48,7 +45,7 @@ if kr_price is not None and not df_intl.empty:
     latest_intl_price = df_intl['Intl_KRW_g'].iloc[-1]
     disparity = ((kr_price - latest_intl_price) / latest_intl_price) * 100
 
-    # 상단 지표 레이아웃
+    # 상단 지표 표시 (Metric)
     col1, col2, col3 = st.columns(3)
     col1.metric("오늘 국내 금값", f"{kr_price:,.0f} 원/g")
     col2.metric("오늘 국제 환산가", f"{latest_intl_price:,.0f} 원/g")
@@ -57,7 +54,7 @@ if kr_price is not None and not df_intl.empty:
     # 차트 생성
     fig = go.Figure()
 
-    # 국제 금값 선 그래프
+    # 국제 금값 선 그래프 추가
     fig.add_trace(go.Scatter(
         x=df_intl.index, 
         y=df_intl['Intl_KRW_g'],
@@ -66,6 +63,8 @@ if kr_price is not None and not df_intl.empty:
         line=dict(color='#1f77b4', width=2)
     ))
 
-    # 우측 상단 괴리율 텍스트 박스 추가
+    # 우측 상단 괴리율 박스 추가 (여기서 괄호 닫는 것을 주의하세요!)
     fig.add_annotation(
         xref="paper", yref="paper",
+        x=0.98, y=0.95,
+        text=f"<b>오늘의 괴리율:
