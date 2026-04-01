@@ -22,7 +22,7 @@ def get_korea_gold():
         return None
 
 @st.cache_data(ttl=3600)
-def load_intl_gold_data():
+def load_gold_data():
     try:
         gold = yf.download('GC=F', period='1y')['Close']
         fx = yf.download('KRW=X', period='1y')['Close']
@@ -61,10 +61,4 @@ def get_dual_momentum_signal():
         return "데이터 오류", "gray"
 
 # --- 메인 화면 ---
-st.title("🚀 퀀트 투자 통합 리밸런싱 대시보드")
-st.write(f"최근 업데이트: {datetime.now().strftime('%Y-%m-%d')}")
-
-# 섹션 1: 금 시세
-with st.expander("🟡 국내/국제 금 시세 및 괴리율 확인", expanded=True):
-    kr_gold = get_korea_gold()
-    df_intl = load_intl
+st.title("🚀 퀀트 투자 통합 리밸런싱 대
