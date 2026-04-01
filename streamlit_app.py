@@ -67,38 +67,4 @@ st.write(f"최근 업데이트: {datetime.now().strftime('%Y-%m-%d')}")
 # 섹션 1: 금 시세
 with st.expander("🟡 국내/국제 금 시세 및 괴리율 확인", expanded=True):
     kr_gold = get_korea_gold()
-    df_intl = load_intl_gold_data()
-    if kr_gold and not df_intl.empty:
-        intl_gold = df_intl['Intl_KRW_g'].iloc[-1]
-        gap = ((kr_gold - intl_gold) / intl_gold) * 100
-        c1, c2, c3 = st.columns(3)
-        c1.metric("국내 금값", f"{kr_gold:,.0f}원")
-        c2.metric("국제 환산가", f"{intl_gold:,.0f}원")
-        c3.metric("괴리율", f"{gap:.2f}%")
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df_intl.index, y=df_intl['Intl_KRW_g'], name='국제 금값(원/g)'))
-        fig.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0))
-        st.plotly_chart(fig, use_container_width=True)
-
-st.markdown("---")
-
-# 섹션 2: 3대 전략 리밸런싱 신호
-st.subheader("📬 이번 달 전략별 매수 신호")
-col_baa, col_bond, col_dual = st.columns(3)
-
-with st.spinner('전략 계산 중...'):
-    # 1. 공격형 BAA
-    with col_baa:
-        st.info("### 1. 공격형 BAA")
-        canary = all(get_13612_score(t) > 0 for t in ['VWO', 'BND'])
-        if canary:
-            agg_assets = ['QQQ', 'SPY', 'IWM', 'VGK', 'EWJ', 'VWO', 'GLD', 'DBC']
-            scores = {t: get_13612_score(t) for t in agg_assets}
-            best = max(scores, key=scores.get)
-            st.error(f"**모드: 공격 🔥**\n\n# {best}")
-        else:
-            prot_assets = ['BIL', 'IEF', 'TIP']
-            scores = {t: get_13612_score(t) for t in prot_assets}
-            best = max(scores, key=scores.get)
-            st.info(f"**모드: 수비 🛡️**\
+    df_intl = load_intl
