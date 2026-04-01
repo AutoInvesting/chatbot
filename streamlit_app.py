@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 # 1. 페이지 설정
-st.set_page_config(page_title="Quant Dashboard", layout="wide")
+st.set_page_config(page_title="Quant Tax-Free Dashboard", layout="wide")
 
 # --- 핵심 데이터 함수 ---
 
@@ -39,16 +39,17 @@ def get_score(ticker):
         d = yf.download(ticker, period='14m')['Close']
         if len(d) < 252: return -999.0
         curr = d.iloc[-1]
+        # 13612 모멘텀 스코어 공식
         s = (12*(curr/d.iloc[-21]-1)) + (4*(curr/d.iloc[-63]-1)) + (2*(curr/d.iloc[-126]-1)) + (1*(curr/d.iloc[-252]-1))
         return float(s)
     except:
         return -999.0
 
-# --- 메인 화면 구성 ---
-st.title("💰 Quant & Gold Dashboard")
-st.write(f"Update: {datetime.now().strftime('%Y-%m-%d')}")
+# --- 메인 화면 ---
+st.title("💰 Tax-Free Quant Dashboard")
+st.write(f"최종 업데이트: {datetime.now().strftime('%Y-%m-%d')}")
 
-# 섹션 1: 금 시세 분석
+# 섹션 1: 금 시세
 with st.expander("Gold Analysis", expanded=True):
     kr = get_gold()
     df_g = load_data()
@@ -56,70 +57,69 @@ with st.expander("Gold Analysis", expanded=True):
         intl = df_g['KRW_g'].iloc[-1]
         gap = ((kr - intl) / intl) * 100
         c1, c2, c3 = st.columns(3)
-        c1.metric("Korea Gold", f"{kr:,.0f}원")
-        c2.metric("Intl Gold", f"{intl:,.0f}원")
-        c3.metric("Gap (%)", f"{gap:.2f}%")
+        c1.metric("국내 금 시세", f"{kr:,.0f}원")
+        c2.metric("국제 환산가", f"{intl:,.0f}원")
+        c3.metric("괴리율(Gap)", f"{gap:.2f}%")
         fig = go.Figure(go.Scatter(x=df_g.index, y=df_g['KRW_g'], name='Price'))
         fig.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0))
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.write("금 데이터를 불러오는 중입니다...")
 
 st.divider()
 
-# 섹션 2: 3대 전략 리밸런싱
-st.subheader("📬 Monthly Rebalancing Signals")
+# 섹션 2: 3대 전략 (PTP 종목 제외 완료)
+st.subheader("📬 월간 리밸런싱 신호 (No-PTP Ver.)")
 col1, col2, col3 = st.columns(3)
 
-with st.spinner('Calculating Strategy Signals...'):
-    # 1. BAA 전략
+with st.spinner('계산 중...'):
+    # 1. BAA 전략 (공격형 유니버스 수정)
     with col1:
-        st.info("### 1. BAA Strategy")
-        v_s = get_score('VWO')
-        b_s = get_score('BND')
-        if v_s > 0 and b_s > 0:
-            ast = ['QQQ', 'SPY', 'IWM', 'VGK', 'EWJ', 'VWO', 'GLD', 'DBC']
-            res_dict = {t: get_score(t) for t in ast}
-            best_ticker = max(res_dict, key=res_dict.get)
-            st.error("MODE: Aggressive 🔥")
-            st.markdown(f"## Buy: {best_ticker}")
+        st.info("### 1. BAA 공격형")
+        # 카나리아 지표 (보수적 접근: 둘 다 0보다 커야 함)
+        if get_score('VWO') > 0 and get_score('BND') > 0:
+            # DBC(PTP) -> PDBC(No-PTP)로 교체 / GLD 등 안전 종목 위주
+            ast = ['QQQ', 'SPY', 'IWM', 'VGK', 'EWJ', 'VWO', 'GLD', 'PDBC'] 
+            res = {t: get_score(t) for t in ast}
+            best = max(res, key=res.get)
+            st.error("모드: 공격 🔥")
+            st.markdown(f"## 추천: {best}")
         else:
+            # 수비 자산
             ast = ['BIL', 'IEF', 'TIP']
-            res_dict = {t: get_score(t) for t in ast}
-            best_ticker = max(res_dict, key=res_dict.get)
-            st.success("MODE: Protective 🛡️")
-            st.markdown(f"## Buy: {best_ticker}")
+            res = {t: get_score(t) for t in ast}
+            best = max(res, key=res.get)
+            st.success("모드: 수비 🛡️")
+            st.markdown(f"## 추천: {best}")
 
     # 2. 채권 동적 배분
     with col2:
-        st.info("### 2. Bond Dynamic")
-        b_list = ['TLT', 'IEF', 'SHY', 'LQD', 'TIP']
-        b_res = {t: get_score(t) for t in b_list}
+        st.info("### 2. 채권 동적 배분")
+        # PTP 이슈 없는 채권 ETF들
+        b_ast = ['TLT', 'IEF', 'SHY', 'LQD', 'TIP']
+        b_res = {t: get_score(t) for t in b_ast}
         b_best = max(b_res, key=b_res.get)
-        st.success("MODE: Rotation 📈")
-        st.markdown(f"## Buy: {b_best}")
+        st.success("모드: 로테이션 📈")
+        st.markdown(f"## 추천: {b_best}")
 
     # 3. 변형 듀얼 모멘텀
     with col3:
-        st.info("### 3. Dual Momentum")
+        st.info("### 3. 변형 듀얼 모멘텀")
         try:
-            d_data = {}
+            d_s = {}
             for t in ['SPY', 'EFA', 'BIL']:
                 px = yf.download(t, period='13m')['Close']
-                if not px.empty:
-                    d_data[t] = (px.iloc[-1] / px.iloc[0]) - 1
-                else:
-                    d_data[t] = -999.0
+                d_s[t] = (px.iloc[-1] / px.iloc[0]) - 1 if not px.empty else -999.0
             
-            winner = 'SPY' if d_data['SPY'] > d_data['EFA'] else 'EFA'
-            if d_data[winner] < d_data['BIL'] or d_data[winner] < 0:
-                st.success("MODE: Risk-Off 💤")
-                st.markdown("## Buy: BIL")
+            # 상대 모멘텀 승자 결정
+            win = 'SPY' if d_s['SPY'] > d_s['EFA'] else 'EFA'
+            # 절대 모멘텀(0 혹은 BIL보다 높아야 함)
+            if d_s[win] < d_s['BIL'] or d_s[win] < 0:
+                st.success("모드: 현금 대기 💤")
+                st.markdown("## 추천: BIL")
             else:
-                st.error("MODE: Risk-On 🚀")
-                st.markdown(f"## Buy: {winner}")
+                st.error("모드: 주식 보유 🚀")
+                st.markdown(f"## 추천: {win}")
         except:
-            st.write("데이터를 계산할 수 없습니다.")
+            st.write("데이터 오류")
 
 st.divider()
-st.caption("제공되는 데이터는 야후 파이낸스 기반이며, 투자 책임은 본인에게 있습니다.")
+st.caption("⚠️ DBC 등 PTP 세금 이슈 종목은 유니버스에서 제외되었습니다. (PDBC로 대체)")
