@@ -9,64 +9,83 @@ from datetime import datetime
 # 1. 페이지 설정
 st.set_page_config(page_title="Quant Dashboard", layout="wide")
 
-# --- 데이터 로직 함수들 ---
+# --- 핵심 함수 (데이터 수집 및 모멘텀 계산) ---
 
-def get_korea_gold():
+def get_gold():
     try:
         url = "https://finance.naver.com/marketindex/goldDetail.naver"
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(res.text, 'html.parser')
-        price_text = soup.select_one('.value').text
-        return float(price_text.replace(',', ''))
-    except:
-        return None
+        val = soup.select_one('.value').text
+        return float(val.replace(',', ''))
+    except: return None
 
 @st.cache_data(ttl=3600)
-def load_gold_data():
+def load_data():
     try:
-        gold = yf.download('GC=F', period='1y')['Close']
-        fx = yf.download('KRW=X', period='1y')['Close']
-        df = pd.concat([gold, fx], axis=1).dropna()
-        df.columns = ['USD_oz', 'FX']
-        df['Intl_KRW_g'] = (df['USD_oz'] * df['FX']) / 31.1034768
+        g = yf.download('GC=F', period='1y')['Close']
+        x = yf.download('KRW=X', period='1y')['Close']
+        df = pd.concat([g, x], axis=1).dropna()
+        df.columns = ['USD', 'FX']
+        df['KRW_g'] = (df['USD'] * df['FX']) / 31.1034768
         return df
-    except:
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
-def get_13612_score(ticker):
+def get_score(ticker):
     try:
-        data = yf.download(ticker, period='14m')['Close']
-        if len(data) < 252: return -999.0
-        curr = data.iloc[-1]
-        m1, m3, m6, m12 = data.iloc[-21], data.iloc[-63], data.iloc[-126], data.iloc[-252]
-        score = (12 * (curr/m1 - 1)) + (4 * (curr/m3 - 1)) + (2 * (curr/m6 - 1)) + (1 * (curr/m12 - 1))
-        return float(score)
-    except:
-        return -999.0
+        d = yf.download(ticker, period='14m')['Close']
+        if len(d) < 252: return -999.0
+        c = d.iloc[-1]
+        s = (12*(c/d.iloc[-21]-1)) + (4*(c/d.iloc[-63]-1)) + (2*(c/d.iloc[-126]-1)) + (1*(c/d.iloc[-252]-1))
+        return float(s)
+    except: return -999.0
 
-def get_dual_momentum_signal():
-    try:
-        tickers = ['SPY', 'EFA', 'BIL']
-        scores = {}
-        for t in tickers:
-            data = yf.download(t, period='13m')['Close']
-            ret_12m = (data.iloc[-1] / data.iloc[0]) - 1
-            scores[t] = float(ret_12m)
-        winner = 'SPY' if scores['SPY'] > scores['EFA'] else 'EFA'
-        if scores[winner] < scores['BIL'] or scores[winner] < 0:
-            return "Cash (BIL)", "blue"
-        return winner, "red"
-    except:
-        return "Error", "gray"
-
-# --- 메인 화면 ---
-st.title("Quant Portfolio Dashboard") # 한글 깨짐 방지를 위해 영문 혼용
-st.write(f"Updated: {datetime.now().strftime('%Y-%m-%d')}")
+# --- 화면 구성 ---
+st.title("💰 Quant & Gold Dashboard")
+st.write(f"Update: {datetime.now().strftime('%Y-%m-%d')}")
 
 # 섹션 1: 금 시세
-with st.expander("Gold Price Analysis", expanded=True):
-    kr_gold = get_korea_gold()
-    df_intl = load_gold_data()
-    if kr_gold and not df_intl.empty:
-        intl_gold = df_intl['Intl_KRW_g'].iloc[-1]
-        gap = ((kr_
+with st.expander("Gold Analysis", expanded=True):
+    kr = get_gold()
+    df = load_data()
+    if kr and not df.empty:
+        intl = df['KRW_g'].iloc[-1]
+        gap = ((kr - intl) / intl) * 100
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Korea Gold", f"{kr:,.0f}원")
+        c2.metric("Intl Gold", f"{intl:,.0f}원")
+        c3.metric("Gap (%)", f"{gap:.2f}%")
+        fig = go.Figure(go.Scatter(x=df.index, y=df['KRW_g'], name='Price'))
+        fig.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+
+# 섹션 2: 3대 전략
+st.subheader("📬 Monthly Rebalancing")
+col1, col2, col3 = st.columns(3)
+
+with st.spinner('Calculating...'):
+    # 1. BAA
+    with col1:
+        st.info("### 1. BAA")
+        if get_score('VWO') > 0 and get_score('BND') > 0:
+            ast = ['QQQ', 'SPY', 'IWM', 'VGK', 'EWJ', 'VWO', 'GLD', 'DBC']
+            res = {t: get_score(t) for t in ast}
+            st.error(f"MODE: Aggressive 🔥 / Buy: {max(res, key=res.get)}")
+        else:
+            ast = ['BIL', 'IEF', 'TIP']
+            res = {t: get_score(t) for t in ast}
+            st.success(f"MODE: Protective 🛡️ / Buy: {max(res, key=res.get)}")
+
+    # 2. Bond Dynamic
+    with col2:
+        st.info("### 2. Bond")
+        ast = ['TLT', 'IEF', 'SHY', 'LQD', 'TIP']
+        res = {t: get_score(t) for t in ast}
+        st.success(f"MODE: Rotation 📈 / Buy: {max(res, key=res.get)}")
+
+    # 3. Dual Momentum
+    with col3:
+        st.info("### 3. Dual")
+        s = {t: (yf.download(
