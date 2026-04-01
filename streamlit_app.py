@@ -26,6 +26,7 @@ def load_data():
     try:
         g = yf.download('GC=F', period='1y')['Close']
         x = yf.download('KRW=X', period='1y')['Close']
+        if g.empty or x.empty: return pd.DataFrame()
         df = pd.concat([g, x], axis=1).dropna()
         df.columns = ['USD', 'FX']
         df['KRW_g'] = (df['USD'] * df['FX']) / 31.1034768
@@ -38,7 +39,6 @@ def get_score(ticker):
         d = yf.download(ticker, period='14m')['Close']
         if len(d) < 252: return -999.0
         curr = d.iloc[-1]
-        # 13612 가중치 모멘텀 공식
         s = (12*(curr/d.iloc[-21]-1)) + (4*(curr/d.iloc[-63]-1)) + (2*(curr/d.iloc[-126]-1)) + (1*(curr/d.iloc[-252]-1))
         return float(s)
     except:
@@ -62,6 +62,8 @@ with st.expander("Gold Analysis", expanded=True):
         fig = go.Figure(go.Scatter(x=df_g.index, y=df_g['KRW_g'], name='Price'))
         fig.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0))
         st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.write("금 데이터를 불러오는 중입니다...")
 
 st.divider()
 
@@ -100,18 +102,24 @@ with st.spinner('Calculating Strategy Signals...'):
     # 3. 변형 듀얼 모멘텀
     with col3:
         st.info("### 3. Dual Momentum")
-        d_data = {}
-        for t in ['SPY', 'EFA', 'BIL']:
-            px = yf.download(t, period='13m')['Close']
-            d_data[t] = (px.iloc[-1] / px.iloc[0]) - 1
-        
-        winner = 'SPY' if d_data['SPY'] > d_data['EFA'] else 'EFA'
-        if d_data[winner] < d_data['BIL'] or d_data[winner] < 0:
-            st.success("MODE: Risk-Off 💤")
-            st.markdown("## Buy: BIL")
-        else:
-            st.error("MODE: Risk-On 🚀")
-            st.markdown(f"## Buy: {winner}")
+        try:
+            d_data = {}
+            for t in ['SPY', 'EFA', 'BIL']:
+                px = yf.download(t, period='13m')['Close']
+                if not px.empty:
+                    d_data[t] = (px.iloc[-1] / px.iloc[0]) - 1
+                else:
+                    d_data[t] = -999.0
+            
+            winner = 'SPY' if d_data['SPY'] > d_data['EFA'] else 'EFA'
+            if d_data[winner] < d_data['BIL'] or d_data[winner] < 0:
+                st.success("MODE: Risk-Off 💤")
+                st.markdown("## Buy: BIL")
+            else:
+                st.error("MODE: Risk-On 🚀")
+                st.markdown(f"## Buy: {winner}")
+        except:
+            st.write("데이터를 계산할 수 없습니다.")
 
 st.divider()
 st.caption("제공되는 데이터는 야후 파이낸스 기반이며, 투자 책임은 본인에게 있습니다.")
