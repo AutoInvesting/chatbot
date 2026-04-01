@@ -34,32 +34,93 @@ def load_intl_gold_data():
         return pd.DataFrame()
 
 def get_13612_score(ticker):
-    """BAA 및 동적 자산배분용 13612 모멘텀 스코어 계산"""
     try:
         data = yf.download(ticker, period='14m')['Close']
         if len(data) < 252: return -999
         curr = data.iloc[-1]
         m1, m3, m6, m12 = data.iloc[-21], data.iloc[-63], data.iloc[-126], data.iloc[-252]
         score = (12 * (curr/m1 - 1)) + (4 * (curr/m3 - 1)) + (2 * (curr/m6 - 1)) + (1 * (curr/m12 - 1))
-        return score
-    except: return -999
+        return float(score)
+    except:
+        return -999.0
 
 def get_dual_momentum_signal():
-    """변형 듀얼 모멘텀: SPY vs EFA(선진국) vs BIL(현금)"""
     try:
         tickers = ['SPY', 'EFA', 'BIL']
         scores = {}
         for t in tickers:
             data = yf.download(t, period='13m')['Close']
-            # 절대 모멘텀: 12개월 수익률이 0보다 큰가?
             ret_12m = (data.iloc[-1] / data.iloc[0]) - 1
-            scores[t] = ret_12m
+            scores[t] = float(ret_12m)
         
-        # 상대 모멘텀: SPY와 EFA 중 높은 것 선택
         winner = 'SPY' if scores['SPY'] > scores['EFA'] else 'EFA'
-        
-        # 절대 모멘텀 적용: 승자가 현금(BIL) 수익률보다 낮거나 0보다 작으면 현금
         if scores[winner] < scores['BIL'] or scores[winner] < 0:
             return "현금 대피 (BIL)", "blue"
         return winner, "red"
-    except: return "데이터 오류", "gray
+    except:
+        return "데이터 오류", "gray"
+
+# --- 메인 화면 ---
+st.title("🚀 퀀트 투자 통합 리밸런싱 대시보드")
+st.write(f"최근 업데이트: {datetime.now().strftime('%Y-%m-%d')}")
+
+# 섹션 1: 금 시세
+with st.expander("🟡 국내/국제 금 시세 및 괴리율 확인", expanded=True):
+    kr_gold = get_korea_gold()
+    df_intl = load_intl_gold_data()
+    if kr_gold and not df_intl.empty:
+        intl_gold = df_intl['Intl_KRW_g'].iloc[-1]
+        gap = ((kr_gold - intl_gold) / intl_gold) * 100
+        c1, c2, c3 = st.columns(3)
+        c1.metric("국내 금값", f"{kr_gold:,.0f}원")
+        c2.metric("국제 환산가", f"{intl_gold:,.0f}원")
+        c3.metric("괴리율", f"{gap:.2f}%")
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_intl.index, y=df_intl['Intl_KRW_g'], name='국제 금값(원/g)'))
+        fig.update_layout(height=300, margin=dict(l=0,r=0,t=0,b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+st.markdown("---")
+
+# 섹션 2: 3대 전략 리밸런싱 신호
+st.subheader("📬 이번 달 전략별 매수 신호")
+col_baa, col_bond, col_dual = st.columns(3)
+
+with st.spinner('전략 계산 중...'):
+    # 1. 공격형 BAA
+    with col_baa:
+        st.info("### 1. 공격형 BAA")
+        canary = all(get_13612_score(t) > 0 for t in ['VWO', 'BND'])
+        if canary:
+            agg_assets = ['QQQ', 'SPY', 'IWM', 'VGK', 'EWJ', 'VWO', 'GLD', 'DBC']
+            scores = {t: get_13612_score(t) for t in agg_assets}
+            best = max(scores, key=scores.get)
+            st.error(f"**모드: 공격 🔥**\n\n# {best}")
+        else:
+            prot_assets = ['BIL', 'IEF', 'TIP']
+            scores = {t: get_13612_score(t) for t in prot_assets}
+            best = max(scores, key=scores.get)
+            st.primary(f"**모드: 수비 🛡️**\n\n# {best}")
+
+    # 2. 채권 동적 자산배분
+    with col_bond:
+        st.info("### 2. 채권 동적 배분")
+        bonds = ['TLT', 'IEF', 'SHY', 'LQD', 'TIP']
+        bond_scores = {t: get_13612_score(t) for t in bonds}
+        best_bond = max(bond_scores, key=bond_scores.get)
+        st.success(f"**모드: 채권 로테이션 📈**\n\n# {best_bond}")
+
+    # 3. 변형 듀얼 모멘텀
+    with col_dual:
+        st.info("### 3. 변형 듀얼 모멘텀")
+        signal, s_color = get_dual_momentum_signal()
+        if s_color == "red":
+            st.error(f"**모드: 주식 보유 🚀**\n\n# {signal}")
+        elif s_color == "blue":
+            st.primary(f"**모드: 현금 대기 💤**\n\n# {signal}")
+        else:
+            st.write("데이터 로딩 중...")
+
+st.markdown("---")
+st.caption("제공되는 데이터는 야후 파이낸스 기반이며, 투자 책임은 본인에게 있습니다.")
