@@ -17,18 +17,19 @@ def get_korea_gold_price():
         price_text = soup.select_one('.value').text
         return float(price_text.replace(',', ''))
     except Exception as e:
-        st.error(f"국내 가격 로드 실패: {e}")
         return None
 
 # 2. 국제 데이터 로드 (금 선물 & 환율)
-@st.cache_data(ttl=3600) # 1시간마다 캐시 갱신
+@st.cache_data(ttl=3600)
 def load_intl_data():
     # 금 선물(GC=F)과 환율(KRW=X) 최근 1년치
     gold = yf.download('GC=F', period='1y')['Close']
     fx = yf.download('KRW=X', period='1y')['Close']
+    
     df = pd.concat([gold, fx], axis=1)
     df.columns = ['USD_oz', 'FX']
     df = df.dropna()
+    
     # 국제 가격을 원/g으로 환산 (1oz = 31.1034768g)
     df['Intl_KRW_g'] = (df['USD_oz'] * df['FX']) / 31.1034768
     return df
@@ -39,7 +40,7 @@ st.title("💰 국내/국제 금 시세 및 괴리율")
 kr_price = get_korea_gold_price()
 df_intl = load_intl_data()
 
-if kr_price and not df_intl.empty:
+if kr_price is not None and not df_intl.empty:
     # 오늘의 국제 환산가 및 괴리율 계산
     latest_intl_price = df_intl['Intl_KRW_g'].iloc[-1]
     disparity = ((kr_price - latest_intl_price) / latest_intl_price) * 100
@@ -48,9 +49,9 @@ if kr_price and not df_intl.empty:
     col1, col2, col3 = st.columns(3)
     col1.metric("오늘 국내 금값", f"{kr_price:,.0f} 원/g")
     col2.metric("오늘 국제 환산가", f"{latest_intl_price:,.0f} 원/g")
-    col3.metric("오늘의 괴리율 (%)", f"{disparity:.2f}%", delta=f"{disparity:.2f}%", delta_color="inverse")
+    col3.metric("오늘의 괴리율 (%)", f"{disparity:.2f}%")
 
-    # 차트 그리기
+    # 차트 생성
     fig = go.Figure()
 
     # 국제 금값 선 그래프
@@ -62,7 +63,7 @@ if kr_price and not df_intl.empty:
         line=dict(color='#1f77b4', width=2)
     ))
 
-    # 우측 상단 괴리율 텍스트 박스 추가 (Annotation)
+    # 우측 상단 괴리율 텍스트 박스 추가 (여기 괄호를 확실히 닫았습니다!)
     fig.add_annotation(
         xref="paper", yref="paper",
         x=0.98, y=0.95,
@@ -71,4 +72,21 @@ if kr_price and not df_intl.empty:
         font=dict(size=16, color="white"),
         bgcolor="firebrick",
         bordercolor="black",
-        borderwidth
+        borderwidth=1,
+        borderpad=4,
+        align="right"
+    )
+
+    fig.update_layout(
+        title="최근 1년 국제 금 가격 추이 (원화 환산 기준)",
+        xaxis_title="날짜",
+        yaxis_title="가격 (원/g)",
+        hovermode="x unified",
+        template="plotly_white"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+    st.info("💡 차트는 국제 금 가격 흐름이며, 괴리율은 오늘 네이버 국내가와 국제 환산가를 비교한 수치입니다.")
+
+else:
+    st.warning("데이터를 불러오는 중입니다. 잠시
