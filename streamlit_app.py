@@ -5,66 +5,67 @@ import requests
 from bs4 import BeautifulSoup
 import plotly.graph_objects as go
 
-# 1. 페이지 기본 설정
+# 1. 페이지 설정
 st.set_page_config(page_title="금 시세 괴리율 분석", layout="wide")
 
-# 2. 네이버에서 오늘 한국 금 시세(원/g) 가져오는 함수
-def get_korea_gold_price():
+# 2. 국내 금 시세 가져오기 (네이버)
+def get_korea_gold():
     try:
         url = "https://finance.naver.com/marketindex/goldDetail.naver"
         res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(res.text, 'html.parser')
         price_text = soup.select_one('.value').text
         return float(price_text.replace(',', ''))
-    except Exception as e:
+    except:
         return None
 
-# 3. 국제 데이터(금 선물, 환율) 로드 함수
+# 3. 국제 데이터 가져오기 (야후 파이낸스)
 @st.cache_data(ttl=3600)
-def load_intl_data():
+def load_data():
     try:
         gold = yf.download('GC=F', period='1y')['Close']
         fx = yf.download('KRW=X', period='1y')['Close']
         df = pd.concat([gold, fx], axis=1)
         df.columns = ['USD_oz', 'FX']
         df = df.dropna()
-        # 국제 가격을 원/g으로 환산 (1oz = 31.1034768g)
+        # 원/g 환산 (1oz = 31.1034768g)
         df['Intl_KRW_g'] = (df['USD_oz'] * df['FX']) / 31.1034768
         return df
     except:
         return pd.DataFrame()
 
-# --- 메인 실행 화면 ---
-st.title("💰 국내/국제 금 시세 및 괴리율 분석")
+# 메인 화면
+st.title("💰 금 시세 국내/국제 괴리율 분석")
 
-kr_price = get_korea_gold_price()
-df_intl = load_intl_data()
+kr_price = get_korea_gold()
+df_intl = load_data()
 
-if kr_price is not None and not df_intl.empty:
-    # 오늘의 국제 환산가 및 괴리율 계산
-    latest_intl_price = df_intl['Intl_KRW_g'].iloc[-1]
-    disparity = ((kr_price - latest_intl_price) / latest_intl_price) * 100
+if kr_price and not df_intl.empty:
+    latest_intl = df_intl['Intl_KRW_g'].iloc[-1]
+    disparity = ((kr_price - latest_intl) / latest_intl) * 100
 
-    # 상단 지표 표시 (Metric)
-    col1, col2, col3 = st.columns(3)
-    col1.metric("오늘 국내 금값", f"{kr_price:,.0f} 원/g")
-    col2.metric("오늘 국제 환산가", f"{latest_intl_price:,.0f} 원/g")
-    col3.metric("오늘의 괴리율 (%)", f"{disparity:.2f}%")
+    # 상단 지표
+    c1, c2, c3 = st.columns(3)
+    c1.metric("국내 금값 (원/g)", f"{kr_price:,.0f}")
+    c2.metric("국제 환산가 (원/g)", f"{latest_intl:,.0f}")
+    c3.metric("오늘의 괴리율", f"{disparity:.2f}%")
 
-    # 차트 생성
+    # 차트 (가장 단순하고 안전한 형태)
     fig = go.Figure()
-
-    # 국제 금값 선 그래프 추가
     fig.add_trace(go.Scatter(
         x=df_intl.index, 
         y=df_intl['Intl_KRW_g'],
-        mode='lines',
-        name='국제 금 시세(원/g 환산)',
-        line=dict(color='#1f77b4', width=2)
+        name='국제 금 시세(원/g)'
     ))
+    
+    fig.update_layout(
+        title="최근 1년 국제 금 시세 추이",
+        template="plotly_white",
+        hovermode="x unified"
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    st.info(f"현재 국내가와 국제 환산가의 차이(괴리율)는 {disparity:.2f}% 입니다.")
 
-    # 우측 상단 괴리율 박스 추가 (여기서 괄호 닫는 것을 주의하세요!)
-    fig.add_annotation(
-        xref="paper", yref="paper",
-        x=0.98, y=0.95,
-        text=f"<b>오늘의 괴리율:
+else:
+    st.warning("데이터 로딩 중입니다. 잠시 후 새로고침 해주세요.")
