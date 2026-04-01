@@ -1,56 +1,76 @@
 import streamlit as st
-from openai import OpenAI
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
+# 페이지 기본 설정
+st.set_page_config(page_title="금 가격 괴리율 대시보드", layout="wide")
+st.title("📈 한국 vs 국제 금 가격 괴리율 분석")
+
+@st.cache_data # 데이터 로딩 속도 최적화를 위한 캐싱
+def load_data():
+    # 1. 국제 금 가격 (Gold Futures, GC=F) 및 원달러 환율 (KRW=X) 데이터 가져오기
+    gold_intl = yf.download('GC=F', period='1y')['Close']
+    krw_usd = yf.download('KRW=X', period='1y')['Close']
+    
+    # 데이터프레임 병합
+    df = pd.concat([gold_intl, krw_usd], axis=1)
+    df.columns = ['Intl_Gold_USD_oz', 'Exchange_Rate']
+    df = df.dropna()
+    
+    # 2. 국제 금 가격을 원/g 단위로 변환 (1 troy ounce = 31.1034768 grams)
+    df['Intl_Gold_KRW_g'] = (df['Intl_Gold_USD_oz'] * df['Exchange_Rate']) / 31.1034768
+    
+    # 3. 한국 금 가격 (가상 데이터: 국제 가격에 1%~3% 프리미엄 추가)
+    # [주의] 이 부분은 추후 한국거래소(KRX)나 한국금거래소 크롤링 데이터로 교체하세요!
+    np.random.seed(42)
+    premium = np.random.uniform(1.01, 1.03, len(df))
+    df['Korea_Gold_KRW_g'] = df['Intl_Gold_KRW_g'] * premium
+    
+    # 4. 괴리율 계산 (%)
+    df['Disparity_Rate'] = ((df['Korea_Gold_KRW_g'] - df['Intl_Gold_KRW_g']) / df['Intl_Gold_KRW_g']) * 100
+    
+    return df
+
+# 데이터 로드
+df = load_data()
+
+# 최신 괴리율 지표 보여주기
+latest_disparity = df['Disparity_Rate'].iloc[-1]
+st.metric(label="현재 김치 프리미엄(괴리율)", value=f"{latest_disparity:.2f}%")
+
+# Plotly를 이용한 반응형 콤보 차트 생성
+fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+# 왼쪽 Y축: 금 가격
+fig.add_trace(
+    go.Scatter(x=df.index, y=df['Korea_Gold_KRW_g'], name="한국 금 가격 (원/g)", line=dict(color='red')),
+    secondary_y=False,
+)
+fig.add_trace(
+    go.Scatter(x=df.index, y=df['Intl_Gold_KRW_g'], name="국제 금 가격 (원/g)", line=dict(color='blue', dash='dot')),
+    secondary_y=False,
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+# 오른쪽 Y축: 괴리율 (막대 그래프)
+fig.add_trace(
+    go.Bar(x=df.index, y=df['Disparity_Rate'], name="괴리율 (%)", opacity=0.3, marker_color='orange'),
+    secondary_y=True,
+)
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# 차트 레이아웃 설정
+fig.update_layout(
+    title_text="최근 1년 한국/국제 금 가격 및 괴리율 추이",
+    hovermode="x unified"
+)
+fig.update_yaxes(title_text="가격 (원/g)", secondary_y=False)
+fig.update_yaxes(title_text="괴리율 (%)", secondary_y=True)
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# Streamlit에 차트 그리기
+st.plotly_chart(fig, use_container_width=True)
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
-
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
-
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+# 데이터프레임 표기 (옵션)
+with st.expander("상세 데이터 보기"):
+    st.dataframe(df.tail(10))
