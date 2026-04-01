@@ -36,7 +36,7 @@ def load_intl_gold_data():
 def get_13612_score(ticker):
     try:
         data = yf.download(ticker, period='14m')['Close']
-        if len(data) < 252: return -999
+        if len(data) < 252: return -999.0
         curr = data.iloc[-1]
         m1, m3, m6, m12 = data.iloc[-21], data.iloc[-63], data.iloc[-126], data.iloc[-252]
         score = (12 * (curr/m1 - 1)) + (4 * (curr/m3 - 1)) + (2 * (curr/m6 - 1)) + (1 * (curr/m12 - 1))
@@ -101,26 +101,4 @@ with st.spinner('전략 계산 중...'):
             prot_assets = ['BIL', 'IEF', 'TIP']
             scores = {t: get_13612_score(t) for t in prot_assets}
             best = max(scores, key=scores.get)
-            st.primary(f"**모드: 수비 🛡️**\n\n# {best}")
-
-    # 2. 채권 동적 자산배분
-    with col_bond:
-        st.info("### 2. 채권 동적 배분")
-        bonds = ['TLT', 'IEF', 'SHY', 'LQD', 'TIP']
-        bond_scores = {t: get_13612_score(t) for t in bonds}
-        best_bond = max(bond_scores, key=bond_scores.get)
-        st.success(f"**모드: 채권 로테이션 📈**\n\n# {best_bond}")
-
-    # 3. 변형 듀얼 모멘텀
-    with col_dual:
-        st.info("### 3. 변형 듀얼 모멘텀")
-        signal, s_color = get_dual_momentum_signal()
-        if s_color == "red":
-            st.error(f"**모드: 주식 보유 🚀**\n\n# {signal}")
-        elif s_color == "blue":
-            st.primary(f"**모드: 현금 대기 💤**\n\n# {signal}")
-        else:
-            st.write("데이터 로딩 중...")
-
-st.markdown("---")
-st.caption("제공되는 데이터는 야후 파이낸스 기반이며, 투자 책임은 본인에게 있습니다.")
+            st.info(f"**모드: 수비 🛡️**\
